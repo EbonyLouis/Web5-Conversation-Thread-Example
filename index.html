@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Threaded Conversation with Web5</title>
+    <script type="module">
+      import { Web5 } from "https://cdn.jsdelivr.net/npm/@web5/api@0.8.3/dist/browser.mjs";
+
+      async function initWeb5() {
+        const { web5, did: myDid } = await Web5.connect();
+
+        // Define the protocol
+        const threadProtocolDefinition = {
+          protocol: "http://threaded-conversation-protocol.com",
+          published: true,
+          types: {
+            post: {
+              schema: "http://your-schema-url-for-post",
+              dataFormats: ["application/json"],
+            },
+            reply: {
+              schema: "http://your-schema-url-for-reply",
+              dataFormats: ["application/json"],
+            },
+          },
+          structure: {
+            post: {
+              $actions: [
+                {
+                  who: "anyone",
+                  can: "write",
+                },
+              ],
+              reply: {
+                // first reply to original post
+                $actions: [
+                  {
+                    who: "anyone",
+                    can: "write",
+                  },
+                ],
+                reply: {
+                  // reply to a reply
+                  $actions: [
+                    {
+                      who: "anyone",
+                      can: "write",
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        };
+
+        // Install protocol
+        const { protocol, status } = await web5.dwn.protocols.configure({
+          message: {
+            definition: threadProtocolDefinition,
+          },
+        });
+        await protocol.send(myDid);
+
+        // Create original post
+        const postData = { content: "This is the original post" };
+        const postResponse = await web5.dwn.records.create({
+          data: postData,
+          message: {
+            protocol: "http://threaded-conversation-protocol.com",
+            protocolPath: "post",
+            schema: "http://your-schema-url-for-post",
+            published: true,
+          },
+        });
+
+        console.log("Post creation response:", postResponse);
+
+        if (!postResponse || !postResponse.record || !postResponse.record.id) {
+          console.error("Failed to create the post or missing ID.");
+          return;
+        }
+
+        const postId = postResponse.record.id;
+        const contextId = postResponse.record.contextId;
+
+        await postResponse.record.send(myDid);
+
+        // Reply to original post
+        const replyData = { content: "This is a reply to the original post" };
+        const replyResponse = await web5.dwn.records.create({
+          data: replyData,
+          message: {
+            protocol: "http://threaded-conversation-protocol.com",
+            protocolPath: "post/reply",
+            schema: "http://your-schema-url-for-reply",
+            published: true,
+            parentId: postId,
+            contextId: contextId,
+          },
+        });
+
+        console.log("Reply creation response:", replyResponse);
+
+        if (
+          !replyResponse ||
+          !replyResponse.record ||
+          !replyResponse.record.id
+        ) {
+          console.error("Failed to create the reply or missing ID.");
+          return;
+        }
+
+        await replyResponse.record.send(myDid);
+
+        // Replying to reply
+        const replyToReplyData = {
+          content: "This is a reply to the first reply",
+        };
+        const replyToReplyResponse = await web5.dwn.records.create({
+          data: replyToReplyData,
+          message: {
+            protocol: "http://threaded-conversation-protocol.com",
+            protocolPath: "post/reply/reply",
+            schema: "http://your-schema-url-for-reply",
+            published: true,
+            parentId: replyResponse.record.id,
+            contextId: postResponse.record.contextId,
+          },
+        });
+        console.log("Reply to reply creation response:", replyToReplyResponse);
+
+        if (
+          !replyToReplyResponse ||
+          !replyToReplyResponse.record ||
+          !replyToReplyResponse.record.id
+        ) {
+          console.error("Failed to create the reply to reply or missing ID.");
+          return;
+        }
+        await replyToReplyResponse.record.send(myDid);
+
+        // Display the thread in the UI
+        displayThread(postResponse.record, [
+          replyResponse.record,
+          replyToReplyResponse.record,
+        ]);
+
+        async function displayThread(post, replies) {
+          const threadContainer = document.getElementById("thread-container");
+
+          const postContent = await post.data.json();
+          threadContainer.innerHTML = `<div><strong>Original Post:</strong> ${postContent.content}</div>`;
+
+          for (const reply of replies) {
+            const replyContent = await reply.data.json();
+            threadContainer.innerHTML += `<div style="margin-left:20px;"><strong>Reply:</strong> ${replyContent.content}</div>`;
+          }
+        }
+      }
+
+      window.addEventListener("load", initWeb5);
+    </script>
+  </head>
+  <body>
+    <h1>Threaded Conversation Example</h1>
+    <div id="thread-container"></div>
+  </body>
+</html>
